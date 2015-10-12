@@ -1,0 +1,243 @@
+#lang scribble/lp
+
+@section{Parts of the program}
+
+We start by calling the packages we need for the programming logic and the graphics. Then we implement the mechanics of the game, the graphics, and finally we put it all together.
+
+@chunk[<main>
+       <packages>
+       <game-mechanics>
+       <render-the-board>
+       <start-the-game>
+       ]
+
+Incidentally, the packages we need address these three aspects: @racket{racket} for the programming logic, @racket{2htdp/image} for displaying the game state on screen, and @racket{2htdp/universe} for implementing both into the flow of a typical video game. Additionally we use @racket{rackunit} to test our code.
+
+@chunk[<packages>
+       (require racket)
+       (require 2htdp/image)
+       (require 2htdp/universe)
+       (require rackunit)]
+
+@section{Game mechanics}
+
+The game of 2048 is a turn-based game. There is no background process that rushes you, no nasty sprites that come after you when you hesitate. Each turn you shove all tiles into one direction. After that, a random empty square is filled with a "2" or a "4" with equal probability. 
+
+@chunk[<game-mechanics>
+       <move-tiles>
+       <seed-new-tiles>]
+
+The board in the original game is quadratic. in this program, I have decided it as a list of lists of equal length. This way the board can easily be redefined in any rectangular shape. 
+
+An empty square is denoted by @racket{#f}. It is returned by the @racket{not} function in the definition. A square with a number on it is referred to as a tile.
+
+@chunk[<empty-board>
+       (define board-width 4)
+       (define board-height 4)
+       (define board 
+         (build-list board-height 
+                     (lambda (x) (build-list board-width not))))]
+
+If we had modelled the board as an array, we'd have a more symmetrial arrangement and moving in different directions could have been accomplished by writing a general algorithm with the direction as just one argument. But we have modelled the board as a list, which means there is an asymmetry with respect to directions. So we describe the turn in one direction only and then generalise movement for all four directions. This will be easier than it sounds, promise!
+
+@chunk[<move-tiles>
+       <move-along-list>
+       <generalise-move-for-all-directions>]
+
+A move in 2048 reminds me of knocking a can of ground coffee, base down, on the table, in order to condense the crumbs to have the can fit more coffee. In the game there are two aspects of condensing: All tiles go ``down'' and the empty spaces go ``up'', and subsequent tiles with identical numbers are replaced by a tile with the sum of those numbers.
+
+In the implementation, I have thought of this as a two-step process. The first step, @racket{shove}, is shoving all tiles to one end of the list and all empty bits to the other. The second step, @racket{merge}, is to replace all subsequent list elements with identical numbers with an element containing their sum and a @racket{#f} element. 
+
+@chunk[<move-along-list>
+       <shove>
+       <merge>
+       <shove-tests>
+       <merge-tests>]
+
+Both steps are defined for one row (a list of elements) and later be applied to a list of lists:
+
+@chunk[<shove-and-merge>
+       (map (compose merge shove) board)]
+
+Shoving is easy. Simply have all numbers first and all @elem{#f} last. Like this:
+
+@chunk[<shove-tests>
+       (check-equal? 
+        (shove '(#f "foo" 4 #f 'bar 2))
+        '("foo" 4 'bar 2 #f #f)
+        "shove not implemented properly: all #f elements should come first, followed by all non-#f elements")]
+
+Both are selected by @racket{filter}. 
+
+@chunk[<shove>
+       (define (shove vec) 
+         (append (filter identity vec) 
+                 (filter not vec)))]
+
+The @racket{merge} step is defined recursively. An empty list, a list containing only one element or a list containing only @racket{#f} (only the first element is queried, as, remember, all @racket{#f} have been shoven to the end of the list) is returned unaltered. If the first and second element of the list are mergeable (the @racket{merge-crit} on them returns @racket{#t}, they are replaced by a tile containing their sum, and a @racket{#f} is added to the end of the list. In the game of 2048, the merge criterion is @racket{equal?}, but you may want to replace it with @racket{(λ (x y) (and x y))} if you don't like a game to end. Be aware that @racket{merge-crit} must accept numbers or @racket{#f} as arguments, but must not return @racket{#t} unless both arguments are numbers.
+
+@chunk[<merge>
+       (define/contract (merge vec) 
+         (-> list? list?)
+         (cond [(null? vec) vec]
+               [(not (first vec)) vec]
+               [(null? (rest vec)) vec]
+               [(merge-crit? (first vec) (second vec)) 
+                (append (list (+ (first vec) (second vec)))
+                        (merge  (cddr vec))
+                        (list #f))]
+               [else (cons (first vec) (merge (rest vec)))]))
+       
+       (define merge-crit? equal?)]
+
+This should result in the following behaviour:
+
+@chunk[<merge-tests>
+       (check-equal? 
+        (merge '(1 2 2 3 4 4 4 #f))
+        '(1 4 3 8 4 #f #f #f)
+        "merge not implemented properly: all pairwise adjacent elements with equal value should be replaced by their sum")]
+
+In order to generalise a move into either of the four directions, we can define and use a function to rotate the board, like this:
+
+@chunk[<tilt-tests>
+       (check-equal? 
+        (tilt '((1 2 3)(4 5 6)(7 8 9)))
+        '((3 6 9)(2 5 8)(1 4 7))
+        "tilt should rotate a list of lists of equal length counterclockwise")]
+
+This is how the function is implemented. Arguments are not checked for compatibility with function. Passing a list of lists with unequal lengths will lead to unexpected results.
+
+@chunk[<tilt-board>
+       (define (tilt board)
+         (define (tilt-inner lst)
+           (if (null? (first lst)) '()
+               (cons (map first lst)
+                     (tilt-inner (map rest lst)))))
+         (reverse (tilt-inner board)))
+       <tilt-tests>]
+
+A shove-and-merge in one direction can then be accomplished by rotating the board into the position in which we have implemented the move, perform the shove-and-merge, and rotate the resulting board back into original position. Note how @racket{compose} comes in handy here, originally the code read @racket{(define (north board) (tilt (tilt (tilt (west (tilt board)))))).}
+
+@chunk[<generalise-move-for-all-directions>
+       <tilt-board>
+       
+       (define (west board)
+         <shove-and-merge>)
+       (define north (compose tilt tilt tilt west tilt))
+       (define east (compose tilt tilt west tilt tilt))
+       (define south (compose tilt west tilt tilt tilt))
+       ]
+
+@section{Seed new tiles}
+
+After each player turn, the program adds one number tile to a random empty space to the board. 
+
+It turns out that randomizing is a bit more tricky than desired. This is where the modelling of the board gets in the way. Coordinates in a matrix could be stored in a list for random selection more easily than positions in a list of lists. Whatever we do, it is useful to first see how many empty spaces we have to randomize over. This is simply the number of spaces denoted @racket{#f} in the arrangement. 
+
+Again, we define the function recursively. This will pay off a bit later.
+
+@chunk[<number-empty-spaces>
+       (define/contract (numfalse board) 
+         (-> (or/c number? #f list?) (or/c number? list?))
+         (cond [(null? board) 0]
+               [(list? board) 
+                (+ (numfalse (first board)) (numfalse (rest board)))]
+               [(not board) 1]
+               [else 0]))]
+
+The function to seed new tiles will count all the empty spaces, then generate a random number up to the number of tiles, then traverse the structure to determine where the tile is seeded. It will re-count the number of empty spaces in the substructure, visit the substructure if the random number is lower than the number of empty spaces, otherwise deduct the number of empty spaces from the random number and visit the other part of the substructure. 
+
+@chunk[<seed-new-tiles>
+       <number-empty-spaces>
+       (define/contract (seed board)
+         (-> list? list?)
+         (define nf (numfalse board))
+         (define (seed-rec v r)
+           (cond [(null? v) v]
+                 [(list? v)
+                  (if <tile-to-be-seeded-into-rest>
+                      <visit-rest-and-keep-first>
+                      <visit-first-and-keep-rest>)]
+                 [(and (not v) (= r 0)) 
+                  (+ (* (random 2) 2) 2)]
+                 [else v]))
+         (seed-rec board (random nf)))]
+
+To decide if the tile is to be seeded into the rest part we look if the random number is equal to or greater than the number of empty spaces in the first part.
+
+@chunk[<tile-to-be-seeded-into-rest>
+       (<= (numfalse (first v)) r)]
+
+If this is the case, we leave the first part alone and apply the seeding to the rest. 
+
+@chunk[<visit-rest-and-keep-first>
+       (cons (first v) 
+             (seed-rec (rest v) 
+                       (- r (numfalse (first v)))))]
+
+(Note how the recursive definition of @racket{numfalse} helps us to use it here with impunity.)
+
+Otherwise, the first part is visited and the rest is left unaltered. 
+
+@chunk[<visit-first-and-keep-rest>
+       (cons (seed-rec (first v) r)
+             (rest v))]
+
+@section{Render the board}
+
+I have chosen a simple rendering using the image package, which makes it easy stacking and aligning image elements. Even in rendering, we can use recursion. It looks a bit strange mapping the empty list to an invisible element with dimensions 0 but it works. This function looks at the first element. If it is a list, it decides it is in vertical mode and the elements are to be stacked atop each other. If it is an element, it creates a new square box containing the number or nothing, and sets it besides the existing elements.
+
+@chunk[<place-board>
+       (define (place-board v)
+         (cond [(null? v) (rectangle 0 0 "solid" "white")]
+               [(list? (first v)) (above (place-board (first v)) (place-board (rest v)))]
+               [else (beside (text-box (first v)) (place-board (rest v)))]))]
+
+       
+The text box itself is square. It's empty and light blue if the cell is empty, or black number on white background if it is a tile.
+
+@chunk[<render-the-board>
+       (define square-width 40)
+       
+       (define (text-box n)
+         (overlay (if n (text (number->string n) 12 "black")
+                      (rectangle (* .9 square-width)
+                                 (* .9 square-width)
+                                 "solid" (color 190 250 250 250)))
+                  (rectangle square-width square-width "solid" "white")))
+       <place-board>]
+
+@section{Putting it all together}
+
+The kraken is released by the @racket{big-bang} function. It handles the change of game state dependent on the number of keystrokes, the ending condition of the game, and the rendering function. The latter has already been defined in the previous section. Now we look at the ending condition. It is reached when neither of the four actions a player could perform would change the state of the board. To this end, all four possible moves and their effects on the board are examined.
+
+@chunk[<start-the-game>
+       <empty-board>
+       
+       (big-bang (seed (seed board))
+                 (on-key <case-by-case-keystrokes>)
+                 (stop-when (λ (w) 
+                              (and (equal? w (west w))
+                                   (equal? w (north w))
+                                   (equal? w (east w))
+                                   (equal? w (south w)))))
+                 (to-draw place-board))]
+
+The argument of @racket{on-key} is a function that takes the game state and the key stroked (striked? stricken?) as arguments. A key stroke that causes a move (all others are ignored and have the current state returned) will trigger the shove-and-merge action followed by the seeding of a new tile.  
+
+@chunk[<case-by-case-keystrokes>
+       (λ (w k)
+         (cond [(key=? k "up") (seed (north w))]
+               [(key=? k "down") (seed (south w))]
+               [(key=? k "left") (seed (west w))]
+               [(key=? k "right") (seed (east  w))]
+               [else w]))]
+
+@section{Open issues}
+The original game, as most video games, comes with a score, which is incremented by the value of each new tile formed by merging. No score has been implemented yet.
+
+A more serious issue is that, unlike the original game, a player's move is not checked if it alters the current situation. A south shove when all tiles have already sunk to the bottom would be ignored in the original 2048 while here it would be accepted and followed by the seeding of a new tile. This may even cause an error when a non-altering move is tried on the full board and the program tries to seed another tile on a board with no empty spaces. (It is instructive to try and see where the program fails here.)
+
+Both issues can be solved, in a similar vein to the ending condition, by comparing the current state with the state of the board after the move. They are left as an execise to the reader. Note that the game state would probably have to be augmented by the current score. 
+
