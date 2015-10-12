@@ -239,5 +239,5 @@ The original game, as most video games, comes with a score, which is incremented
 
 A more serious issue is that, unlike the original game, a player's move is not checked if it alters the current situation. A south shove when all tiles have already sunk to the bottom would be ignored in the original 2048 while here it would be accepted and followed by the seeding of a new tile. This may even cause an error when a non-altering move is tried on the full board and the program tries to seed another tile on a board with no empty spaces. (It is instructive to try and see where the program fails here.)
 
-Both issues can be solved, in a similar vein to the ending condition, by comparing the current state with the state of the board after the move. They are left as an execise to the reader. Note that the game state would probably have to be augmented by the current score. 
+Both issues can be solved, in a similar vein to the ending condition, by comparing the current state with the state of the board after the move. They are left as an exercise to the reader. Note that the game state would probably have to be augmented by the current score. 
 
